@@ -4,56 +4,46 @@ SnapShare is a photo-sharing app. Users upload photos and scroll a feed of photo
 
 ## 1. Assumptions
 
-- 10,000,000 registered users.
-- 10% are active on a given day.
-- Each active user uploads 1 photo per day.
-- Each active user views 50 feed pages per day.
-- An average photo is 2 MB, and each photo also gets a 50 KB thumbnail.
-- One day is about 100,000 seconds (rounded for easy maths).
-- Peak traffic is about 5x the average.
+| #   | Assumption                                                           |
+| --- | -------------------------------------------------------------------- |
+| 1   | 10,000,000 registered users                                          |
+| 2   | 10% are active on a given day, so 1,000,000 daily active users (DAU) |
+| 3   | Each active user uploads 1 photo per day                             |
+| 4   | Each active user views 50 feed pages per day                         |
+| 5   | An average photo is 2 MB                                             |
+| 6   | Each photo also gets a thumbnail of 50 KB                            |
+| 7   | Busy hours are about 5x the average (rule of thumb)                  |
+| 8   | 1 day is rounded to 100,000 seconds for easy maths                   |
+| 9   | Metadata per photo (owner, caption, time, file paths) is about 1 KB  |
 
-**Daily active users (DAU):** 10,000,000 x 10% = **1,000,000 DAU**
+## 2. Load estimates
 
-## 2. Estimates
+```text
+Uploads (writes):   1,000,000 users x 1 photo        = 1,000,000 per day
+                    1,000,000 / 100,000              = 10 uploads per second (average)
+                    peak (x5)                        = 50 uploads per second
 
-### Uploads per second (writes)
+Feed views (reads): 1,000,000 users x 50 pages       = 50,000,000 per day
+                    50,000,000 / 100,000             = 500 feed views per second (average)
+                    peak (x5)                        = 2,500 feed views per second
 
+Storage per day:    originals:   1,000,000 x 2 MB    = 2,000,000 MB = 2 TB
+                    thumbnails:  1,000,000 x 50 KB   = 50,000,000 KB = 50 GB
+                    metadata:    1,000,000 x 1 KB    = 1 GB
+
+Storage per year:   originals:   2 TB x 365          = 730 TB
+                    thumbnails:  50 GB x 365         = 18,250 GB, about 18 TB
+                    metadata:    1 GB x 365          = 365 GB
+                    total                            = about 750 TB per year
+
+Upload bandwidth:   10 uploads/s x 2 MB              = 20 MB/s average
+                    50 uploads/s x 2 MB              = 100 MB/s at peak
 ```
-Uploads per day:  1,000,000 users x 1 photo = 1,000,000 per day
-Average:          1,000,000 / 100,000       = 10 uploads per second
-Peak (5x):        10 x 5                    = 50 uploads per second
-```
-
-### Feed views per second (reads)
-
-```
-Feed views per day: 1,000,000 users x 50 views = 50,000,000 per day
-Average:            50,000,000 / 100,000       = 500 feed views per second
-Peak (5x):          500 x 5                    = 2,500 feed views per second
-```
-
-### Photo storage per year
-
-```
-Originals per day:   1,000,000 x 2 MB   = 2,000,000 MB = 2 TB per day
-Thumbnails per day:  1,000,000 x 50 KB  = 50,000,000 KB = 50 GB per day
-Total per day:       about 2.05 TB per day
-
-Originals per year:  2 TB x 365         = 730 TB
-Thumbnails per year: 50 GB x 365        = about 18 TB
-Total per year:      about 748 TB (roughly 0.75 PB) per year
-```
-
-| Measure               | Average                                            | Peak (5x) |
-| --------------------- | -------------------------------------------------- | --------- |
-| Uploads per second    | 10                                                 | 50        |
-| Feed views per second | 500                                                | 2,500     |
-| Storage per year      | about 748 TB (730 TB originals + 18 TB thumbnails) | n/a       |
 
 ## 3. Read-heavy or write-heavy?
 
-**SnapShare is read-heavy.** There are 500 feed views per second against 10 uploads per second, a ratio of about **50 reads for every 1 write**.
+**SnapShare is read-heavy in requests**: 500 feed views per second against 10 uploads per second is **50 times more reads than writes** (2,500 vs 50 at peak). So caching and read replicas will help a lot.
 
-What this means for the design:
+It is also **storage-heavy**: the number of writes is small, but each one is large. About 750 TB per year is far too much for a normal database, so photo files must live in object storage, and the database holds only small metadata rows. Compare this with QuickNotes (about 180 GB per year): here the data size, not the request rate, is the main challenge.
 
--
+**Why photo files go in object storage and not in the database:** a database is built for small, structured rows that are queried, joined and updated. Storing 2 MB
